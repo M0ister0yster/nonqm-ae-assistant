@@ -2,6 +2,7 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import quote
 import pandas as pd
 import requests
 
@@ -12,73 +13,87 @@ def fetch_live_proxy_data(api_key):
   print("📡 Pulling live MLO records via ScraperAPI residential proxy...")
   all_leads = []
 
-  # 1. CALIFORNIA DFPI
-  ca_target = "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=200&$where=license_status='Approved'"
-  ca_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={ca_target}"
+  # 1. CALIFORNIA DFPI (URL-encoded target)
+  raw_ca_target = (
+      "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=200"
+  )
+  encoded_ca_target = quote(raw_ca_target, safe="")
+  ca_proxy_url = (
+      f"http://api.scraperapi.com?api_key={api_key}&url={encoded_ca_target}"
+  )
 
   try:
-    res = requests.get(ca_proxy_url, timeout=45)
+    res = requests.get(ca_proxy_url, timeout=60)
     print(f"  [CA Proxy Status] HTTP {res.status_code}")
     if res.status_code == 200 and res.json():
-      for row in res.json():
-        nmls = str(
-            row.get("nmls_id", row.get("license_number", ""))
-        ).strip()
-        name = str(
-            row.get("individual_name", row.get("name", ""))
-        ).strip()
-        company = str(
-            row.get("employer_name", "Independent / Unassigned")
-        ).strip()
+      data = res.json()
+      if isinstance(data, list):
+        for row in data:
+          nmls = str(
+              row.get("nmls_id", row.get("license_number", ""))
+          ).strip()
+          name = str(
+              row.get("individual_name", row.get("name", ""))
+          ).strip()
+          company = str(
+              row.get("employer_name", "Independent / Unassigned")
+          ).strip()
 
-        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
-          all_leads.append({
-              "NMLS_ID": nmls,
-              "Name": name,
-              "Current_Company": company,
-              "State": "CA",
-              "Status": "Approved",
-              "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
-              "Approved_States": "CA",
-          })
-      print(f"  [+] Ingested {len(all_leads)} live CA records.")
+          if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "CA",
+                "Status": "Approved",
+                "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
+                "Approved_States": "CA",
+            })
+        print(f"  [+] Ingested {len(all_leads)} live CA records.")
   except Exception as e:
     print(f"  [-] CA Proxy Error: {e}")
 
-  # 2. ARIZONA DIFI
-  az_target = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=200"
-  az_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={az_target}"
+  # 2. ARIZONA DIFI (URL-encoded target)
+  raw_az_target = (
+      "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=200"
+  )
+  encoded_az_target = quote(raw_az_target, safe="")
+  az_proxy_url = (
+      f"http://api.scraperapi.com?api_key={api_key}&url={encoded_az_target}"
+  )
 
   try:
-    res = requests.get(az_proxy_url, timeout=45)
+    res = requests.get(az_proxy_url, timeout=60)
     print(f"  [AZ Proxy Status] HTTP {res.status_code}")
     if res.status_code == 200 and res.json():
-      az_count = 0
-      for row in res.json():
-        nmls = str(row.get("nmls_id", row.get("license_num", ""))).strip()
-        first = str(row.get("first_name", "")).strip()
-        last = str(row.get("last_name", "")).strip()
-        name = (
-            f"{first} {last}".strip()
-            if first.lower() != "nan" and last.lower() != "nan"
-            else str(row.get("name", "")).strip()
-        )
-        company = str(
-            row.get("company_name", "Independent / Unassigned")
-        ).strip()
+      data = res.json()
+      if isinstance(data, list):
+        az_count = 0
+        for row in data:
+          nmls = str(row.get("nmls_id", row.get("license_num", ""))).strip()
+          first = str(row.get("first_name", "")).strip()
+          last = str(row.get("last_name", "")).strip()
+          name = (
+              f"{first} {last}".strip()
+              if first.lower() != "nan" and last.lower() != "nan"
+              else str(row.get("name", "")).strip()
+          )
+          company = str(
+              row.get("company_name", "Independent / Unassigned")
+          ).strip()
 
-        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
-          all_leads.append({
-              "NMLS_ID": nmls,
-              "Name": name,
-              "Current_Company": company,
-              "State": "AZ",
-              "Status": "Active",
-              "Lead_Trigger": "🟢 Live License Approval (AZ DIFI)",
-              "Approved_States": "AZ",
-          })
-          az_count += 1
-      print(f"  [+] Ingested {az_count} live AZ records.")
+          if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "AZ",
+                "Status": "Active",
+                "Lead_Trigger": "🟢 Live License Approval (AZ DIFI)",
+                "Approved_States": "AZ",
+            })
+            az_count += 1
+        print(f"  [+] Ingested {az_count} live AZ records.")
   except Exception as e:
     print(f"  [-] AZ Proxy Error: {e}")
 
@@ -116,7 +131,7 @@ def send_email_alert(sender_email, sender_pass, df):
   try:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = (
-        f"🎯 Multi-State NMLS Pipeline Alert: {len(df)} Verified MLO Leads"
+        f"🎯 Multi-State NMLS Pipeline Alert: {len(df)} Live MLO Leads"
     )
     msg["From"] = sender_email
     msg["To"] = RECIPIENT_EMAIL
