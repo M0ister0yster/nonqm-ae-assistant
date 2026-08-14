@@ -9,135 +9,104 @@ RECIPIENT_EMAIL = "cmausman14@gmail.com"
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
+        " like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 }
 
 
-def fetch_live_mlo_data():
-  print("📡 Starting multi-state NMLS lead ingestion...")
+def fetch_live_state_data():
+  print("📡 Pulling live active MLO records from public state endpoints...")
   all_leads = []
 
-  # 1. CALIFORNIA DFPI REGISTRY
+  # 1. LIVE CALIFORNIA DFPI MLO REGISTRY (Socrata API)
   try:
     ca_url = (
-        "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=50&$where=license_status='Approved'"
+        "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=200&$where=license_status='Approved'"
     )
-    res = requests.get(ca_url, headers=HEADERS, timeout=8)
+    res = requests.get(ca_url, headers=HEADERS, timeout=15)
     if res.status_code == 200 and res.json():
       for row in res.json():
-        all_leads.append({
-            "NMLS_ID": str(
-                row.get("nmls_id", row.get("license_number", "1029384"))
-            ),
-            "Name": row.get(
-                "individual_name", row.get("name", "Active Loan Officer")
-            ),
-            "Current_Company": row.get(
-                "employer_name", "Independent / Unassigned"
-            ),
-            "State": "CA",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active License (CA DFPI Feed)",
-        })
-      print(f"  [+] Ingested {len(all_leads)} California MLO records.")
-  except Exception as e:
-    print(f"  [-] CA endpoint note: {e}")
-
-  # 2. ARIZONA DIFI REGISTRY
-  try:
-    az_url = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=50"
-    res = requests.get(az_url, headers=HEADERS, timeout=8)
-    if res.status_code == 200 and res.json():
-      count = 0
-      for row in res.json():
-        nmls = str(row.get("nmls_id", row.get("license_num", "")))
-        if nmls:
+        nmls = str(row.get("nmls_id", row.get("license_number", ""))).strip()
+        name = row.get("individual_name", row.get("name", "")).strip()
+        company = row.get(
+            "employer_name", "Independent / Unassigned"
+        ).strip()
+        if nmls and name:
           all_leads.append({
               "NMLS_ID": nmls,
-              "Name": (
-                  f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-                  or "Active Loan Officer"
-              ),
-              "Current_Company": row.get(
-                  "company_name", "Independent / Unassigned"
-              ),
+              "Name": name,
+              "Current_Company": company,
+              "State": "CA",
+              "Status": "Approved",
+              "Lead_Trigger": "🟢 Active License (CA DFPI Feed)",
+              "Approved_States": "CA",
+          })
+      print(f"  [+] Ingested {len(all_leads)} live California MLO records.")
+  except Exception as e:
+    print(f"  [-] CA endpoint error: {e}")
+
+  # 2. LIVE ARIZONA DIFI MLO REGISTRY
+  try:
+    az_url = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=200"
+    res = requests.get(az_url, headers=HEADERS, timeout=15)
+    if res.status_code == 200 and res.json():
+      az_count = 0
+      for row in res.json():
+        nmls = str(row.get("nmls_id", row.get("license_num", ""))).strip()
+        first = row.get("first_name", "").strip()
+        last = row.get("last_name", "").strip()
+        name = f"{first} {last}".strip()
+        company = row.get("company_name", "Independent / Unassigned").strip()
+        if nmls and name:
+          all_leads.append({
+              "NMLS_ID": nmls,
+              "Name": name,
+              "Current_Company": company,
               "State": "AZ",
               "Status": "Active",
               "Lead_Trigger": "🟢 Active License (AZ DIFI Feed)",
+              "Approved_States": "AZ",
           })
-          count += 1
-      print(f"  [+] Ingested {count} Arizona MLO records.")
+          az_count += 1
+      print(f"  [+] Ingested {az_count} live Arizona MLO records.")
   except Exception as e:
-    print(f"  [-] AZ endpoint note: {e}")
+    print(f"  [-] AZ endpoint error: {e}")
 
-  # 3. DIRECT STATE / NATIONAL SEED ENGINE (Guarantees data creation across footprint)
-  if len(all_leads) < 10:
-    print("  [!] Direct state endpoints rate-limited. Injecting seed dataset.")
-    seed_records = [
-        {
-            "NMLS_ID": "1849302",
-            "Name": "Marcus Vance",
-            "Current_Company": "Premier Mortgage Lending",
-            "State": "CA",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active Multi-State Expansion",
-        },
-        {
-            "NMLS_ID": "2048591",
-            "Name": "Sarah Jenkins",
-            "Current_Company": "Sunbelt Financial Services",
-            "State": "AZ",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active Multi-State Expansion",
-        },
-        {
-            "NMLS_ID": "1938204",
-            "Name": "David Miller",
-            "Current_Company": "Apex Home Loans",
-            "State": "TX",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active Multi-State Expansion",
-        },
-        {
-            "NMLS_ID": "1720493",
-            "Name": "Rachel Adams",
-            "Current_Company": "Cascade Mortgage Corp",
-            "State": "OR",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active Multi-State Expansion",
-        },
-        {
-            "NMLS_ID": "2104829",
-            "Name": "Michael Chang",
-            "Current_Company": "Pacific Wholesale Lending",
-            "State": "VA",
-            "Status": "Active",
-            "Lead_Trigger": "🟢 Active Multi-State Expansion",
-        },
-    ]
-    all_leads.extend(seed_records)
+  if not all_leads:
+    print("❌ No records retrieved from live endpoints.")
+    return pd.DataFrame()
 
   df = pd.DataFrame(all_leads)
   df.drop_duplicates(subset=["NMLS_ID"], inplace=True)
 
-  # Always save output file directly
+  # Ensure every column expected by app.py exists
+  required_cols = [
+      "NMLS_ID",
+      "Name",
+      "Current_Company",
+      "State",
+      "Status",
+      "Lead_Trigger",
+      "Approved_States",
+  ]
+  for col in required_cols:
+    if col not in df.columns:
+      df[col] = "N/A"
+
   df.to_csv("master_leads.csv", index=False)
-  print(
-      f"✅ Successfully written {len(df)} records directly to master_leads.csv"
-  )
+  print(f"✅ Saved {len(df)} 100% REAL state-verified records to master_leads.csv")
   return df
 
 
 def send_email_alert(sender_email, sender_pass, df):
   if df.empty:
-    print("⚠️ DataFrame is empty, email skipped.")
     return
 
   try:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = (
-        f"🎯 Multi-State NMLS Pipeline Alert: {len(df)} Active Leads Processed"
+        f"🎯 Multi-State NMLS Pipeline Alert: {len(df)} Real MLO Leads"
     )
     msg["From"] = sender_email
     msg["To"] = RECIPIENT_EMAIL
@@ -151,14 +120,14 @@ def send_email_alert(sender_email, sender_pass, df):
     html_content = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
-            <h2 style="color: #0056b3;">🚨 Live Multi-State NMLS Refresh Complete</h2>
-            <p>Hey Christine! Your pipeline scraper pulled live active MLO records across your target footprint.</p>
-            <p><b>Total Active MLO Records Processed:</b> {len(df)}</p>
+            <h2 style="color: #0056b3;">🚨 Live NMLS Real-Data Refresh Complete</h2>
+            <p>Hey Christine! Your pipeline scraper pulled live, verified MLO data directly from active state regulatory registries.</p>
+            <p><b>Total Real Active MLO Records Processed:</b> {len(df)}</p>
             <hr>
-            <h3>🔥 Sample Active MLO Leads:</h3>
+            <h3>🔥 Sample Live MLO Records (Real NMLS IDs):</h3>
             {table_html}
             <br>
-            <p>👉 Open your <b>Champions AE Suite App</b> to interact with all records!</p>
+            <p>👉 Open your <b>Champions AE Suite App</b> to interact with all real records!</p>
           </body>
         </html>
         """
@@ -170,17 +139,15 @@ def send_email_alert(sender_email, sender_pass, df):
     server.login(sender_email, sender_pass)
     server.sendmail(sender_email, RECIPIENT_EMAIL, msg.as_string())
     server.quit()
-    print("📧 Email alert sent successfully!")
+    print("📧 Real-data email alert sent successfully!")
   except Exception as e:
-    print(f"❌ Email sending error: {e}")
+    print(f"Email error: {e}")
 
 
 if __name__ == "__main__":
-  leads_df = fetch_live_mlo_data()
+  leads_df = fetch_live_state_data()
   email_user = os.getenv("EMAIL_USER")
   email_pass = os.getenv("EMAIL_PASS")
 
-  if email_user and email_pass:
+  if email_user and email_pass and not leads_df.empty:
     send_email_alert(email_user, email_pass, leads_df)
-  else:
-    print("⚠️ EMAIL_USER or EMAIL_PASS environment variables missing in runner.")
