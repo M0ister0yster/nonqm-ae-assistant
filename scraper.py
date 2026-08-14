@@ -1,4 +1,3 @@
-import io
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -11,63 +10,97 @@ RECIPIENT_EMAIL = "cmausman14@gmail.com"
 
 
 def fetch_live_mlo_leads(api_key):
-  print(
-      "📡 Pulling live, verified MLO records via ScraperAPI Headless"
-      " Browser..."
-  )
+  print("📡 Pulling live MLO records via ScraperAPI residential proxy...")
   all_leads = []
 
-  # 1. CALIFORNIA DFPI - Live Socrata JSON Feed
-  ca_target = "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=500"
-  ca_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={quote(ca_target, safe='')}&render=true"
+  # 1. CALIFORNIA DFPI - Universal Socrata Endpoint via Proxy
+  ca_target = "https://data.ca.gov/api/3/action/datastore_search?resource_id=mlo-licenses&limit=300"
+  ca_proxy_url = (
+      f"http://api.scraperapi.com?api_key={api_key}&url={quote(ca_target, safe='')}"
+  )
 
   try:
-    print("  [+] Querying California DFPI Endpoint...")
-    res = requests.get(ca_proxy_url, timeout=90)
+    print("  [+] Requesting California DFPI Endpoint...")
+    res = requests.get(ca_proxy_url, timeout=30)
     print(f"  [CA Proxy Status] HTTP {res.status_code}")
 
-    if res.status_code == 200 and res.json():
+    if res.status_code == 200:
       data = res.json()
-      if isinstance(data, list):
-        for row in data:
-          nmls = str(
-              row.get("nmls_id", row.get("license_number", ""))
-          ).strip()
-          name = str(
-              row.get("individual_name", row.get("name", ""))
-          ).strip()
-          company = str(
-              row.get("employer_name", "Independent / Unassigned")
-          ).strip()
+      # Parse Socrata datastore schema
+      records = (
+          data.get("result", {}).get("records", [])
+          if isinstance(data, dict)
+          else []
+      )
 
-          if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
-            all_leads.append({
-                "NMLS_ID": nmls,
-                "Name": name,
-                "Current_Company": company,
-                "State": "CA",
-                "Status": "Approved",
-                "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
-                "Approved_States": "CA",
-            })
-        print(
-            f"  [+] Successfully ingested {len(all_leads)} live CA records."
-        )
+      if not records and isinstance(data, list):
+        records = data
+
+      for row in records:
+        nmls = str(
+            row.get("nmls_id", row.get("NMLS ID", row.get("license_number", "")))
+        ).strip()
+        name = str(
+            row.get(
+                "individual_name", row.get("Individual Name", row.get("name", ""))
+            )
+        ).strip()
+        company = str(
+            row.get(
+                "employer_name",
+                row.get("Employer Name", "Independent / Unassigned"),
+            )
+        ).strip()
+
+        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+          all_leads.append({
+              "NMLS_ID": nmls,
+              "Name": name,
+              "Current_Company": company,
+              "State": "CA",
+              "Status": "Approved",
+              "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
+              "Approved_States": "CA",
+          })
+      print(f"  [+] Ingested {len(all_leads)} live CA records.")
+    else:
+      print(
+          f"  [-] CA primary failed with HTTP {res.status_code}. Attempting"
+          " backup query..."
+      )
+      backup_target = (
+          "https://data.dfpi.ca.gov/api/views/mlo-licenses/rows.json"
+      )
+      res_backup = requests.get(
+          f"http://api.scraperapi.com?api_key={api_key}&url={quote(backup_target, safe='')}",
+          timeout=30,
+      )
+      print(f"  [CA Backup Proxy Status] HTTP {res_backup.status_code}")
   except Exception as e:
-    print(f"  [-] CA Proxy Error: {e}")
+    print(f"  [-] CA Proxy Exception: {e}")
 
-  # 2. ARIZONA DIFI - Live Socrata JSON Feed
-  az_target = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=500"
-  az_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={quote(az_target, safe='')}&render=true"
+  # 2. ARIZONA DIFI - Universal Socrata Endpoint via Proxy
+  az_target = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=300"
+  az_proxy_url = (
+      f"http://api.scraperapi.com?api_key={api_key}&url={quote(az_target, safe='')}&keep_headers=true"
+  )
 
   try:
-    print("  [+] Querying Arizona DIFI Endpoint...")
-    res = requests.get(az_proxy_url, timeout=90)
+    print("  [+] Requesting Arizona DIFI Endpoint...")
+    res = requests.get(
+        az_proxy_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+        },
+        timeout=30,
+    )
     print(f"  [AZ Proxy Status] HTTP {res.status_code}")
 
-    if res.status_code == 200 and res.json():
+    if res.status_code == 200:
       data = res.json()
-      if isinstance(data, list):
+      if isinstance(data, list) and data:
         az_count = 0
         for row in data:
           nmls = str(row.get("nmls_id", row.get("license_num", ""))).strip()
@@ -93,9 +126,9 @@ def fetch_live_mlo_leads(api_key):
                 "Approved_States": "AZ",
             })
             az_count += 1
-        print(f"  [+] Successfully ingested {az_count} live AZ records.")
+        print(f"  [+] Ingested {az_count} live AZ records.")
   except Exception as e:
-    print(f"  [-] AZ Proxy Error: {e}")
+    print(f"  [-] AZ Proxy Exception: {e}")
 
   cols = [
       "NMLS_ID",
@@ -111,10 +144,7 @@ def fetch_live_mlo_leads(api_key):
     df = pd.DataFrame(all_leads)
     df.drop_duplicates(subset=["NMLS_ID"], inplace=True)
   else:
-    print(
-        "⚠️ Live proxy return was empty or timed out. Initializing clean target"
-        " frame."
-    )
+    print("⚠️ No live records returned. Initializing clean target frame.")
     df = pd.DataFrame(columns=cols)
 
   for c in cols:
@@ -128,7 +158,7 @@ def fetch_live_mlo_leads(api_key):
 
 def send_email_alert(sender_email, sender_pass, df):
   if df.empty:
-    print("No live records retrieved; skipping email dispatch.")
+    print("No records retrieved; skipping email dispatch.")
     return
 
   try:
