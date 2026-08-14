@@ -8,22 +8,6 @@ import requests
 
 RECIPIENT_EMAIL = "cmausman14@gmail.com"
 
-# Target Footprint for Champions Funding
-TARGET_STATES = [
-    "CA",
-    "AZ",
-    "MT",
-    "MI",
-    "VA",
-    "VT",
-    "OR",
-    "ID",
-    "UT",
-    "MN",
-    "FL",
-    "TX",
-]
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
@@ -33,31 +17,34 @@ HEADERS = {
 
 
 def fetch_official_state_registries():
-  """Downloads official bulk public registry exports from state financial regulators."""
   print(
-      "📡 Downloading official state regulatory bulk feeds (No CAPTCHA / 100%"
-      " Real)..."
+      "📡 Pulling newest MLO license approvals & transfers from state bulk"
+      " feeds..."
   )
   all_leads = []
 
-  # 1. CALIFORNIA DFPI PUBLIC REGISTRY (Direct Socrata Bulk Export)
+  # 1. CALIFORNIA DFPI - Query explicitly ordered by newest status date
   try:
-    ca_url = "https://data.dfpi.ca.gov/api/views/mlo-licenses/rows.csv?accessType=DOWNLOAD"
-    res = requests.get(ca_url, headers=HEADERS, timeout=30)
-    if res.status_code == 200:
-      ca_df = pd.read_csv(io.StringIO(res.text))
-      # Standardize California columns
-      for _, row in ca_df.head(150).iterrows():
+    # $order=license_status_date DESC gets the absolute newest approvals/changes first
+    ca_url = (
+        "https://data.dfpi.ca.gov/resource/mlo-licenses.json?"
+        "$limit=300&"
+        "$order=license_status_date DESC&"
+        "$where=license_status='Approved'"
+    )
+    res = requests.get(ca_url, headers=HEADERS, timeout=20)
+    if res.status_code == 200 and res.json():
+      for row in res.json():
         nmls = str(
-            row.get(
-                "NMLS ID", row.get("nmls_id", row.get("License Number", ""))
-            )
-        ).split(".")[0]
-        name = str(row.get("Individual Name", row.get("Name", ""))).strip()
-        company = str(
-            row.get("Employer Name", "Independent / Unassigned")
+            row.get("nmls_id", row.get("license_number", ""))
         ).strip()
-        status = str(row.get("License Status", "Approved")).strip()
+        name = str(
+            row.get("individual_name", row.get("name", ""))
+        ).strip()
+        company = str(
+            row.get("employer_name", "Independent / Unassigned")
+        ).strip()
+        status = str(row.get("license_status", "Approved")).strip()
 
         if nmls and name and nmls != "nan" and name != "nan":
           all_leads.append({
@@ -66,34 +53,35 @@ def fetch_official_state_registries():
               "Current_Company": company,
               "State": "CA",
               "Status": status,
-              "Lead_Trigger": "🟢 Active License (CA DFPI Official Registry)",
+              "Lead_Trigger": "🟢 Recent Approval (CA DFPI Feed)",
               "Approved_States": "CA",
           })
-      print(f"  [+] Ingested verified California MLO records.")
+      print(f"  [+] Ingested newest California MLO records.")
   except Exception as e:
     print(f"  [-] CA DFPI bulk download note: {e}")
 
-  # 2. ARIZONA DIFI PUBLIC REGISTRY (Direct Socrata Bulk Export)
+  # 2. ARIZONA DIFI - Query ordered by newest record updates
   try:
-    az_url = "https://data.az.gov/api/views/difi-mortgage-mlo/rows.csv?accessType=DOWNLOAD"
-    res = requests.get(az_url, headers=HEADERS, timeout=30)
-    if res.status_code == 200:
-      az_df = pd.read_csv(io.StringIO(res.text))
-      for _, row in az_df.head(150).iterrows():
-        nmls = str(
-            row.get("NMLS ID", row.get("nmls_id", row.get("License Num", "")))
-        ).split(".")[0]
-        first = str(row.get("First Name", "")).strip()
-        last = str(row.get("Last Name", "")).strip()
+    az_url = (
+        "https://data.az.gov/resource/difi-mortgage-mlo.json?"
+        "$limit=300&"
+        "$order=last_modified_date DESC"
+    )
+    res = requests.get(az_url, headers=HEADERS, timeout=20)
+    if res.status_code == 200 and res.json():
+      for row in res.json():
+        nmls = str(row.get("nmls_id", row.get("license_num", ""))).strip()
+        first = str(row.get("first_name", "")).strip()
+        last = str(row.get("last_name", "")).strip()
         name = (
             f"{first} {last}".strip()
             if first != "nan" and last != "nan"
-            else str(row.get("Name", "")).strip()
+            else str(row.get("name", "")).strip()
         )
         company = str(
-            row.get("Company Name", "Independent / Unassigned")
+            row.get("company_name", "Independent / Unassigned")
         ).strip()
-        status = str(row.get("Status", "Active")).strip()
+        status = str(row.get("status", "Active")).strip()
 
         if nmls and name and nmls != "nan" and name != "nan":
           all_leads.append({
@@ -102,14 +90,13 @@ def fetch_official_state_registries():
               "Current_Company": company,
               "State": "AZ",
               "Status": status,
-              "Lead_Trigger": "🟢 Active License (AZ DIFI Official Registry)",
+              "Lead_Trigger": "🟢 Recent Approval (AZ DIFI Feed)",
               "Approved_States": "AZ",
           })
-      print(f"  [+] Ingested verified Arizona MLO records.")
+      print(f"  [+] Ingested newest Arizona MLO records.")
   except Exception as e:
     print(f"  [-] AZ DIFI bulk download note: {e}")
 
-  # Ensure DataFrame structure and columns match app.py strictly
   cols = [
       "NMLS_ID",
       "Name",
@@ -124,7 +111,7 @@ def fetch_official_state_registries():
     df = pd.DataFrame(all_leads)
     df.drop_duplicates(subset=["NMLS_ID"], inplace=True)
   else:
-    print("⚠️ State feeds down for weekend sync. Initializing clean frame.")
+    print("⚠️ No new records found in this batch. Initializing clean frame.")
     df = pd.DataFrame(columns=cols)
 
   for c in cols:
@@ -138,7 +125,7 @@ def fetch_official_state_registries():
 
 def send_email_alert(sender_email, sender_pass, df):
   if df.empty:
-    print("No records to email.")
+    print("No new records to email.")
     return
 
   try:
