@@ -6,6 +6,40 @@ st.set_page_config(
     page_title="Champions Funding AE Suite", page_icon="🏠", layout="centered"
 )
 
+# ==========================================
+# CUSTOM CSS: ENLARGE MENUS & DROPDOWNS
+# ==========================================
+st.markdown(
+    """
+    <style>
+    /* Make selectbox and multiselect input fields larger */
+    .stSelectbox div[data-baseweb="select"], 
+    .stMultiSelect div[data-baseweb="select"] {
+        font-size: 18px !important;
+        min-height: 52px !important;
+    }
+    
+    /* Make dropdown options text & padding larger */
+    div[data-baseweb="popover"] ul li {
+        font-size: 18px !important;
+        padding: 12px !important;
+    }
+    
+    /* Enlarge tab titles */
+    button[data-baseweb="tab"] {
+        font-size: 18px !important;
+        font-weight: bold !important;
+    }
+    
+    /* Increase table display font size */
+    .stDataFrame {
+        font-size: 16px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 tab1, tab2 = st.tabs(
     ["🧮 DSCR Scenario Desk", "🎯 NMLS Automated Lead Pipeline"]
 )
