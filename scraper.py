@@ -1,4 +1,3 @@
-import io
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -8,22 +7,6 @@ import requests
 
 RECIPIENT_EMAIL = "cmausman14@gmail.com"
 
-# Target Footprint
-TARGET_STATES = [
-    "CA",
-    "AZ",
-    "MT",
-    "MI",
-    "VA",
-    "VT",
-    "OR",
-    "ID",
-    "UT",
-    "MN",
-    "FL",
-    "TX",
-]
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
@@ -32,135 +15,98 @@ HEADERS = {
 }
 
 
-def fetch_state_data_via_pandas():
-  print("📡 Pulling verified MLO records from public state registry files...")
+def fetch_verified_mlo_leads():
+  print("📡 Querying state financial registry API endpoints...")
   all_leads = []
 
-  # 1. CALIFORNIA DFPI CSV EXPORT
+  # 1. CALIFORNIA DFPI PUBLIC ENDPOINT
   try:
-    ca_url = "https://data.dfpi.ca.gov/api/views/mlo-licenses/rows.csv?accessType=DOWNLOAD"
-    res = requests.get(ca_url, headers=HEADERS, timeout=30)
-    print(f"  [CA CSV Status] HTTP {res.status_code}")
-    if res.status_code == 200:
-      df_ca = pd.read_csv(io.StringIO(res.text), low_memory=False)
-      print(f"  [CA CSV Parsed] {len(df_ca)} total rows found.")
+    ca_url = "https://data.ca.gov/api/3/action/datastore_search?resource_id=mlo-licenses&limit=200"
+    res = requests.get(ca_url, headers=HEADERS, timeout=15)
+    print(f"  [CA API Status] HTTP {res.status_code}")
 
-      # Dynamically search for columns regardless of exact naming
-      nmls_col = next(
-          (
-              c
-              for c in df_ca.columns
-              if "nmls" in c.lower() or "license number" in c.lower()
-          ),
-          None,
-      )
-      name_col = next(
-          (
-              c
-              for c in df_ca.columns
-              if "name" in c.lower() or "individual" in c.lower()
-          ),
-          None,
-      )
-      company_col = next(
-          (
-              c
-              for c in df_ca.columns
-              if "employer" in c.lower() or "company" in c.lower()
-          ),
-          None,
-      )
+    # Fallback to direct Socrata JSON
+    if res.status_code != 200:
+      ca_url = "https://data.dfpi.ca.gov/resource/mlo-licenses.json?$limit=200"
+      res = requests.get(ca_url, headers=HEADERS, timeout=15)
 
-      if nmls_col and name_col:
-        for _, row in df_ca.head(300).iterrows():
-          nmls = str(row[nmls_col]).split(".")[0].strip()
-          name = str(row[name_col]).strip()
-          company = (
-              str(row[company_col]).strip()
-              if company_col
-              else "Independent / Unassigned"
-          )
+    if res.status_code == 200 and res.json():
+      data = res.json()
+      records = (
+          data.get("result", {}).get("records", [])
+          if isinstance(data, dict) and "result" in data
+          else data
+      )
+      print(f"  [CA API] Retrieved {len(records)} raw records.")
 
-          if (
-              nmls
-              and name
-              and nmls.lower() != "nan"
-              and name.lower() != "nan"
-              and nmls != ""
-          ):
-            all_leads.append({
-                "NMLS_ID": nmls,
-                "Name": name,
-                "Current_Company": company,
-                "State": "CA",
-                "Status": "Approved",
-                "Lead_Trigger": "🟢 Active License (CA DFPI Registry)",
-                "Approved_States": "CA",
-            })
-        print(f"  [+] Ingested {len(all_leads)} California MLO records.")
+      for row in records:
+        nmls = str(
+            row.get("nmls_id", row.get("NMLS ID", row.get("license_number", "")))
+        ).strip()
+        name = str(
+            row.get(
+                "individual_name", row.get("Individual Name", row.get("name", ""))
+            )
+        ).strip()
+        company = str(
+            row.get(
+                "employer_name",
+                row.get("Employer Name", "Independent / Unassigned"),
+            )
+        ).strip()
+
+        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+          all_leads.append({
+              "NMLS_ID": nmls,
+              "Name": name,
+              "Current_Company": company,
+              "State": "CA",
+              "Status": "Approved",
+              "Lead_Trigger": "🟢 Active License (CA DFPI Feed)",
+              "Approved_States": "CA",
+          })
   except Exception as e:
-    print(f"  [-] CA CSV fetch note: {e}")
+    print(f"  [-] CA API Exception: {e}")
 
-  # 2. ARIZONA DIFI CSV EXPORT
+  # 2. ARIZONA DIFI PUBLIC ENDPOINT
   try:
-    az_url = "https://data.az.gov/api/views/difi-mortgage-mlo/rows.csv?accessType=DOWNLOAD"
-    res = requests.get(az_url, headers=HEADERS, timeout=30)
-    print(f"  [AZ CSV Status] HTTP {res.status_code}")
-    if res.status_code == 200:
-      df_az = pd.read_csv(io.StringIO(res.text), low_memory=False)
-      print(f"  [AZ CSV Parsed] {len(df_az)} total rows found.")
+    az_url = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=200"
+    res = requests.get(az_url, headers=HEADERS, timeout=15)
+    print(f"  [AZ API Status] HTTP {res.status_code}")
 
-      nmls_col = next(
-          (
-              c
-              for c in df_az.columns
-              if "nmls" in c.lower() or "license" in c.lower()
-          ),
-          None,
-      )
-      name_col = next(
-          (
-              c
-              for c in df_az.columns
-              if "name" in c.lower() or "first" in c.lower()
-          ),
-          None,
-      )
-      company_col = next(
-          (c for c in df_az.columns if "company" in c.lower()), None
-      )
+    if res.status_code == 200 and res.json():
+      records = res.json()
+      print(f"  [AZ API] Retrieved {len(records)} raw records.")
 
-      az_count = 0
-      if nmls_col and name_col:
-        for _, row in df_az.head(300).iterrows():
-          nmls = str(row[nmls_col]).split(".")[0].strip()
-          name = str(row[name_col]).strip()
-          company = (
-              str(row[company_col]).strip()
-              if company_col
-              else "Independent / Unassigned"
-          )
+      for row in records:
+        nmls = str(
+            row.get("nmls_id", row.get("NMLS ID", row.get("license_num", "")))
+        ).strip()
+        first = str(row.get("first_name", row.get("First Name", ""))).strip()
+        last = str(row.get("last_name", row.get("Last Name", ""))).strip()
+        name = (
+            f"{first} {last}".strip()
+            if first.lower() != "nan" and last.lower() != "nan"
+            else str(row.get("name", "")).strip()
+        )
+        company = str(
+            row.get(
+                "company_name", row.get("Company Name", "Independent / Unassigned")
+            )
+        ).strip()
 
-          if (
-              nmls
-              and name
-              and nmls.lower() != "nan"
-              and name.lower() != "nan"
-              and nmls != ""
-          ):
-            all_leads.append({
-                "NMLS_ID": nmls,
-                "Name": name,
-                "Current_Company": company,
-                "State": "AZ",
-                "Status": "Active",
-                "Lead_Trigger": "🟢 Active License (AZ DIFI Registry)",
-                "Approved_States": "AZ",
-            })
-            az_count += 1
-        print(f"  [+] Ingested {az_count} Arizona MLO records.")
+        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+          all_leads.append({
+              "NMLS_ID": nmls,
+              "Name": name,
+              "Current_Company": company,
+              "State": "AZ",
+              "Status": "Active",
+              "Lead_Trigger": "🟢 Active License (AZ DIFI Feed)",
+              "Approved_States": "AZ",
+          })
   except Exception as e:
-    print(f"  [-] AZ CSV fetch note: {e}")
+    print(f"  [-] AZ API Exception: {e}")
 
   cols = [
       "NMLS_ID",
@@ -176,7 +122,7 @@ def fetch_state_data_via_pandas():
     df = pd.DataFrame(all_leads)
     df.drop_duplicates(subset=["NMLS_ID"], inplace=True)
   else:
-    print("⚠️ No records parsed from feeds. Initializing clean target frame.")
+    print("⚠️ No records retrieved. Initializing clean target frame.")
     df = pd.DataFrame(columns=cols)
 
   for c in cols:
@@ -210,7 +156,7 @@ def send_email_alert(sender_email, sender_pass, df):
     html_content = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
-            <h2 style="color: #0056b3;">🚨 Verified NMLS Official Registry Refresh</h2>
+            <h2 style="color: #0056b3;">🚨 Verified NMLS Registry Refresh Complete</h2>
             <p>Hey Christine! Your pipeline scraper pulled live, verified MLO records directly from state licensing files.</p>
             <p><b>Total Verified Active MLO Records Processed:</b> {len(df)}</p>
             <hr>
@@ -235,7 +181,7 @@ def send_email_alert(sender_email, sender_pass, df):
 
 
 if __name__ == "__main__":
-  leads_df = fetch_state_data_via_pandas()
+  leads_df = fetch_verified_mlo_leads()
   email_user = os.getenv("EMAIL_USER")
   email_pass = os.getenv("EMAIL_PASS")
 
