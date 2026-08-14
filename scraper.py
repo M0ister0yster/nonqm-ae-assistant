@@ -10,92 +10,90 @@ RECIPIENT_EMAIL = "cmausman14@gmail.com"
 
 
 def fetch_live_mlo_leads(api_key):
-  print("📡 Pulling live MLO records via ScraperAPI residential proxy...")
+  print(
+      "📡 Pulling live MLO records via ScraperAPI US Residential Proxies..."
+  )
   all_leads = []
 
-  # 1. CALIFORNIA DFPI - Universal Socrata Endpoint via Proxy
-  ca_target = "https://data.ca.gov/api/3/action/datastore_search?resource_id=mlo-licenses&limit=300"
-  ca_proxy_url = (
-      f"http://api.scraperapi.com?api_key={api_key}&url={quote(ca_target, safe='')}"
-  )
+  # 1. CALIFORNIA DFPI - Exact Socrata Open Data Endpoint
+  # Target CA DFPI MLO Dataset ID
+  ca_target = "https://data.dfpi.ca.gov/resource/352i-3aw8.json?$limit=300"
+  ca_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={quote(ca_target, safe='')}&country_code=us"
 
   try:
-    print("  [+] Requesting California DFPI Endpoint...")
-    res = requests.get(ca_proxy_url, timeout=30)
+    print("  [+] Requesting California DFPI Registry...")
+    res = requests.get(ca_proxy_url, timeout=45)
     print(f"  [CA Proxy Status] HTTP {res.status_code}")
 
     if res.status_code == 200:
       data = res.json()
-      # Parse Socrata datastore schema
-      records = (
-          data.get("result", {}).get("records", [])
-          if isinstance(data, dict)
-          else []
-      )
+      if isinstance(data, list) and data:
+        for row in data:
+          nmls = str(
+              row.get("nmls_id", row.get("license_number", ""))
+          ).strip()
+          name = str(
+              row.get("individual_name", row.get("name", ""))
+          ).strip()
+          company = str(
+              row.get("employer_name", "Independent / Unassigned")
+          ).strip()
 
-      if not records and isinstance(data, list):
-        records = data
-
-      for row in records:
-        nmls = str(
-            row.get("nmls_id", row.get("NMLS ID", row.get("license_number", "")))
-        ).strip()
-        name = str(
-            row.get(
-                "individual_name", row.get("Individual Name", row.get("name", ""))
-            )
-        ).strip()
-        company = str(
-            row.get(
-                "employer_name",
-                row.get("Employer Name", "Independent / Unassigned"),
-            )
-        ).strip()
-
-        if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
-          all_leads.append({
-              "NMLS_ID": nmls,
-              "Name": name,
-              "Current_Company": company,
-              "State": "CA",
-              "Status": "Approved",
-              "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
-              "Approved_States": "CA",
-          })
-      print(f"  [+] Ingested {len(all_leads)} live CA records.")
+          if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "CA",
+                "Status": "Approved",
+                "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
+                "Approved_States": "CA",
+            })
+        print(f"  [+] Ingested {len(all_leads)} live CA records.")
+      else:
+        print("  [-] CA endpoint returned empty JSON payload.")
     else:
-      print(
-          f"  [-] CA primary failed with HTTP {res.status_code}. Attempting"
-          " backup query..."
+      # Fallback to secondary CA DFPI endpoint
+      print(f"  [-] CA primary returned {res.status_code}. Querying fallback...")
+      ca_fallback = "https://data.ca.gov/api/3/action/datastore_search?resource_id=bf1a5cb2-0d17-488d-a131-0dfae38ec708&limit=300"
+      res_fb = requests.get(
+          f"http://api.scraperapi.com?api_key={api_key}&url={quote(ca_fallback, safe='')}&country_code=us",
+          timeout=45,
       )
-      backup_target = (
-          "https://data.dfpi.ca.gov/api/views/mlo-licenses/rows.json"
-      )
-      res_backup = requests.get(
-          f"http://api.scraperapi.com?api_key={api_key}&url={quote(backup_target, safe='')}",
-          timeout=30,
-      )
-      print(f"  [CA Backup Proxy Status] HTTP {res_backup.status_code}")
+      print(f"  [CA Fallback Status] HTTP {res_fb.status_code}")
+      if res_fb.status_code == 200:
+        fb_data = res_fb.json().get("result", {}).get("records", [])
+        for row in fb_data:
+          nmls = str(row.get("NMLS ID", row.get("nmls_id", ""))).strip()
+          name = str(row.get("Name", row.get("individual_name", ""))).strip()
+          company = str(
+              row.get(
+                  "Employer Name",
+                  row.get("employer_name", "Independent / Unassigned"),
+              )
+          ).strip()
+
+          if nmls and name and nmls.lower() != "nan" and name.lower() != "nan":
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "CA",
+                "Status": "Approved",
+                "Lead_Trigger": "🟢 Live License Approval (CA DFPI)",
+                "Approved_States": "CA",
+            })
+        print(f"  [+] Ingested {len(all_leads)} live CA fallback records.")
   except Exception as e:
     print(f"  [-] CA Proxy Exception: {e}")
 
-  # 2. ARIZONA DIFI - Universal Socrata Endpoint via Proxy
-  az_target = "https://data.az.gov/resource/difi-mortgage-mlo.json?$limit=300"
-  az_proxy_url = (
-      f"http://api.scraperapi.com?api_key={api_key}&url={quote(az_target, safe='')}&keep_headers=true"
-  )
+  # 2. ARIZONA DIFI - Exact Socrata Open Data Endpoint
+  az_target = "https://data.az.gov/resource/ir9e-2iwd.json?$limit=300"
+  az_proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={quote(az_target, safe='')}&country_code=us"
 
   try:
-    print("  [+] Requesting Arizona DIFI Endpoint...")
-    res = requests.get(
-        az_proxy_url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            )
-        },
-        timeout=30,
-    )
+    print("  [+] Requesting Arizona DIFI Registry...")
+    res = requests.get(az_proxy_url, timeout=45)
     print(f"  [AZ Proxy Status] HTTP {res.status_code}")
 
     if res.status_code == 200:
@@ -127,6 +125,8 @@ def fetch_live_mlo_leads(api_key):
             })
             az_count += 1
         print(f"  [+] Ingested {az_count} live AZ records.")
+      else:
+        print("  [-] AZ endpoint returned empty JSON payload.")
   except Exception as e:
     print(f"  [-] AZ Proxy Exception: {e}")
 
