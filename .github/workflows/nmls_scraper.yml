@@ -2,19 +2,21 @@ name: Weekly NMLS Lead Refresh
 
 on:
   schedule:
-    # Runs every Sunday night at 00:00 UTC (Autopilot)
     - cron: '0 0 * * 0'
-  workflow_dispatch: # Allows manual 1-click execution anytime
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   scrape-and-commit:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -23,13 +25,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests beautifulsoup4
 
-      - name: Run NMLS Scraper Script
+      - name: Run NMLS Scraper & Send Alerts
+        env:
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python scraper.py
 
       - name: Commit and push updated leads back to repo
         run: |
-          git config --global user.name "NMLS Auto-Bot"
-          git config --global user.email "bot@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add master_leads.csv
           git commit -m "Auto-update NMLS leads data [skip ci]" || exit 0
           git push
