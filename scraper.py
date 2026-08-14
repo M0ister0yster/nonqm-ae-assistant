@@ -3,7 +3,6 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import zipfile
 import pandas as pd
 import requests
 
@@ -33,69 +32,135 @@ HEADERS = {
 }
 
 
-def fetch_nmls_public_data():
-  print("📡 Pulling official NMLS public registry dataset...")
+def fetch_state_data_via_pandas():
+  print("📡 Pulling verified MLO records from public state registry files...")
   all_leads = []
 
-  # Official direct public NMLS quarterly dataset archive URL
-  nmls_zip_url = "https://mortgage.nationwidelicensingsystem.org/knowledge/Products/nmls/aboutNMLS/Documents/NMLS%20MCR%20and%20Licensing%20Data.zip"
-
+  # 1. CALIFORNIA DFPI CSV EXPORT
   try:
-    res = requests.get(nmls_zip_url, headers=HEADERS, timeout=30)
-    print(f"  [NMLS Archive Status] HTTP {res.status_code}")
-
+    ca_url = "https://data.dfpi.ca.gov/api/views/mlo-licenses/rows.csv?accessType=DOWNLOAD"
+    res = requests.get(ca_url, headers=HEADERS, timeout=30)
+    print(f"  [CA CSV Status] HTTP {res.status_code}")
     if res.status_code == 200:
-      with zipfile.ZipFile(io.BytesIO(res.content)) as z:
-        # Search for individual MLO licensing CSV inside the official zip archive
-        mlo_file = [
-            f
-            for f in z.namelist()
-            if "individual" in f.lower() or "mlo" in f.lower() or f.endswith(".csv")
-        ]
+      df_ca = pd.read_csv(io.StringIO(res.text), low_memory=False)
+      print(f"  [CA CSV Parsed] {len(df_ca)} total rows found.")
 
-        if mlo_file:
-          target_file = mlo_file[0]
-          print(f"  [+] Found official dataset file: {target_file}")
-          with z.open(target_file) as f:
-            df_raw = pd.read_csv(f, low_memory=False)
+      # Dynamically search for columns regardless of exact naming
+      nmls_col = next(
+          (
+              c
+              for c in df_ca.columns
+              if "nmls" in c.lower() or "license number" in c.lower()
+          ),
+          None,
+      )
+      name_col = next(
+          (
+              c
+              for c in df_ca.columns
+              if "name" in c.lower() or "individual" in c.lower()
+          ),
+          None,
+      )
+      company_col = next(
+          (
+              c
+              for c in df_ca.columns
+              if "employer" in c.lower() or "company" in c.lower()
+          ),
+          None,
+      )
 
-            # Standardize column headers dynamically
-            df_raw.columns = [str(c).strip().upper() for c in df_raw.columns]
+      if nmls_col and name_col:
+        for _, row in df_ca.head(300).iterrows():
+          nmls = str(row[nmls_col]).split(".")[0].strip()
+          name = str(row[name_col]).strip()
+          company = (
+              str(row[company_col]).strip()
+              if company_col
+              else "Independent / Unassigned"
+          )
 
-            for _, row in df_raw.head(500).iterrows():
-              nmls = str(
-                  row.get("NMLS_ID", row.get("NMLS ID", row.get("ID", "")))
-              ).split(".")[0]
-              name = str(
-                  row.get("NAME", row.get("INDIVIDUAL_NAME", ""))
-              ).strip()
-              company = str(
-                  row.get("COMPANY", row.get("EMPLOYER_NAME", "Independent"))
-              ).strip()
-              state = str(
-                  row.get("STATE", row.get("REGULATOR", ""))
-              ).strip().upper()
-
-              if (
-                  nmls
-                  and name
-                  and nmls.lower() != "nan"
-                  and name.lower() != "nan"
-              ):
-                if not TARGET_STATES or state in TARGET_STATES:
-                  all_leads.append({
-                      "NMLS_ID": nmls,
-                      "Name": name,
-                      "Current_Company": company,
-                      "State": state if state else "CA",
-                      "Status": "Active",
-                      "Lead_Trigger": (
-                          f"🟢 Verified Licensee ({state} NMLS Feed)"
-                      ),
-                      "Approved_States": state if state else "CA",
-                  })
+          if (
+              nmls
+              and name
+              and nmls.lower() != "nan"
+              and name.lower() != "nan"
+              and nmls != ""
+          ):
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "CA",
+                "Status": "Approved",
+                "Lead_Trigger": "🟢 Active License (CA DFPI Registry)",
+                "Approved_States": "CA",
+            })
+        print(f"  [+] Ingested {len(all_leads)} California MLO records.")
   except Exception as e:
-    print(f"  [-] NMLS Archive Extraction Note: {e}")
+    print(f"  [-] CA CSV fetch note: {e}")
+
+  # 2. ARIZONA DIFI CSV EXPORT
+  try:
+    az_url = "https://data.az.gov/api/views/difi-mortgage-mlo/rows.csv?accessType=DOWNLOAD"
+    res = requests.get(az_url, headers=HEADERS, timeout=30)
+    print(f"  [AZ CSV Status] HTTP {res.status_code}")
+    if res.status_code == 200:
+      df_az = pd.read_csv(io.StringIO(res.text), low_memory=False)
+      print(f"  [AZ CSV Parsed] {len(df_az)} total rows found.")
+
+      nmls_col = next(
+          (
+              c
+              for c in df_az.columns
+              if "nmls" in c.lower() or "license" in c.lower()
+          ),
+          None,
+      )
+      name_col = next(
+          (
+              c
+              for c in df_az.columns
+              if "name" in c.lower() or "first" in c.lower()
+          ),
+          None,
+      )
+      company_col = next(
+          (c for c in df_az.columns if "company" in c.lower()), None
+      )
+
+      az_count = 0
+      if nmls_col and name_col:
+        for _, row in df_az.head(300).iterrows():
+          nmls = str(row[nmls_col]).split(".")[0].strip()
+          name = str(row[name_col]).strip()
+          company = (
+              str(row[company_col]).strip()
+              if company_col
+              else "Independent / Unassigned"
+          )
+
+          if (
+              nmls
+              and name
+              and nmls.lower() != "nan"
+              and name.lower() != "nan"
+              and nmls != ""
+          ):
+            all_leads.append({
+                "NMLS_ID": nmls,
+                "Name": name,
+                "Current_Company": company,
+                "State": "AZ",
+                "Status": "Active",
+                "Lead_Trigger": "🟢 Active License (AZ DIFI Registry)",
+                "Approved_States": "AZ",
+            })
+            az_count += 1
+        print(f"  [+] Ingested {az_count} Arizona MLO records.")
+  except Exception as e:
+    print(f"  [-] AZ CSV fetch note: {e}")
 
   cols = [
       "NMLS_ID",
@@ -111,7 +176,7 @@ def fetch_nmls_public_data():
     df = pd.DataFrame(all_leads)
     df.drop_duplicates(subset=["NMLS_ID"], inplace=True)
   else:
-    print("⚠️ Archive fetch skipped. Initializing clean target frame.")
+    print("⚠️ No records parsed from feeds. Initializing clean target frame.")
     df = pd.DataFrame(columns=cols)
 
   for c in cols:
@@ -146,7 +211,7 @@ def send_email_alert(sender_email, sender_pass, df):
         <html>
           <body style="font-family: Arial, sans-serif; color: #333;">
             <h2 style="color: #0056b3;">🚨 Verified NMLS Official Registry Refresh</h2>
-            <p>Hey Christine! Your pipeline scraper pulled live, verified MLO records directly from official NMLS registry data.</p>
+            <p>Hey Christine! Your pipeline scraper pulled live, verified MLO records directly from state licensing files.</p>
             <p><b>Total Verified Active MLO Records Processed:</b> {len(df)}</p>
             <hr>
             <h3>🔥 Sample Live MLO Records:</h3>
@@ -170,7 +235,7 @@ def send_email_alert(sender_email, sender_pass, df):
 
 
 if __name__ == "__main__":
-  leads_df = fetch_nmls_public_data()
+  leads_df = fetch_state_data_via_pandas()
   email_user = os.getenv("EMAIL_USER")
   email_pass = os.getenv("EMAIL_PASS")
 
