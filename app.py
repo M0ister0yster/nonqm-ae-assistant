@@ -38,7 +38,7 @@ with tab1:
 with tab2:
     st.header("MLO Lead Directory & Prioritization")
     
-    # Drag and Drop CSV Uploader
+    # Drag-and-drop CSV Uploader
     uploaded_file = st.file_uploader("Upload Zillow/NMLS Scraped CSV File", type=["csv"])
     
     df = None
@@ -50,11 +50,9 @@ with tab2:
         st.info("Loaded master_leads.csv from repository.")
     
     if df is not None:
-        # Search bar for quick filtering by name, city, or brokerage
         search_query = st.text_input("🔍 Search Leads (by Name, Brokerage, NMLS #, or City):")
         
         if search_query:
-            # Filter rows across all text columns
             mask = df.astype(str).apply(lambda row: row.str.contains(search_query, case=False).any(), axis=1)
             df_display = df[mask]
         else:
@@ -63,4 +61,4 @@ with tab2:
         st.write(f"Showing **{len(df_display)}** leads:")
         st.dataframe(df_display, use_container_width=True)
     else:
-        st.info("Upload a CSV file above or commit a 'master_leads.csv' file to your GitHub repository to view your leads.")
+        st.info("Upload a CSV file above or save 'master_leads.csv' to view your leads.")
