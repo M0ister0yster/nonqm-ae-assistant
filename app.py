@@ -10,8 +10,9 @@ st.set_page_config(
 
 st.title("⚡ Champions Funding AE Pocket Assistant")
 
-tab1, tab2 = st.tabs(["🧮 DSCR Scenario Calculator", "📋 NMLS Lead Directory"])
+tab1, tab2 = st.tabs(["🧮 DSCR Scenario Calculator", "📋 MLO Lead Directory"])
 
+# ----------------- TAB 1: DSCR CALCULATOR -----------------
 with tab1:
     st.header("DSCR Calculator")
     col1, col2 = st.columns(2)
@@ -33,10 +34,33 @@ with tab1:
         else:
             st.info("Enter PITIA to calculate DSCR.")
 
+# ----------------- TAB 2: MLO LEAD DIRECTORY -----------------
 with tab2:
-    st.header("NMLS Master Leads")
-    if os.path.exists("master_leads.csv"):
+    st.header("MLO Lead Directory & Prioritization")
+    
+    # Drag and Drop CSV Uploader
+    uploaded_file = st.file_uploader("Upload Zillow/NMLS Scraped CSV File", type=["csv"])
+    
+    df = None
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+        st.success("Loaded uploaded CSV dataset!")
+    elif os.path.exists("master_leads.csv"):
         df = pd.read_csv("master_leads.csv")
-        st.dataframe(df, use_container_width=True)
+        st.info("Loaded master_leads.csv from repository.")
+    
+    if df is not None:
+        # Search bar for quick filtering by name, city, or brokerage
+        search_query = st.text_input("🔍 Search Leads (by Name, Brokerage, NMLS #, or City):")
+        
+        if search_query:
+            # Filter rows across all text columns
+            mask = df.astype(str).apply(lambda row: row.str.contains(search_query, case=False).any(), axis=1)
+            df_display = df[mask]
+        else:
+            df_display = df
+            
+        st.write(f"Showing **{len(df_display)}** leads:")
+        st.dataframe(df_display, use_container_width=True)
     else:
-        st.info("No master_leads.csv file found in root directory.")
+        st.info("Upload a CSV file above or commit a 'master_leads.csv' file to your GitHub repository to view your leads.")
