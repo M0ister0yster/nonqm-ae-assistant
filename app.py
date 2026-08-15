@@ -16,7 +16,7 @@ st.set_page_config(
 # APIFY CLIENT INITIALIZATION
 # =========================================================
 # Paste your raw Apify API key inside the quotes below
-APIFY_TOKEN = os.getenv("APIFY_TOKEN", "apify_api_FmYrGI50DDklZRcb1ffD06xYNTYsFJ1rqSpg")
+APIFY_TOKEN = os.getenv("APIFY_TOKEN", "")
 client = ApifyClient(APIFY_TOKEN)
 
 # =========================================================
